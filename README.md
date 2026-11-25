@@ -77,6 +77,7 @@ Open the REFramework menu, then **Script Generated UI** and
 | Keep background during fade (resize it) | Enlarges the frozen screen copy. When off, the copy is skipped instead, which can show the scene settling. |
 | Steady FOV when the map opens and closes | Holds the FOV steady around the map. |
 | Diagnostics | Writes camera and GUI state to `re2_framework_log.txt` for troubleshooting. Off by default. |
+| Camera log | Writes a line to `re2_framework_log.txt` whenever the camera, its FOV or the wide view changes, anywhere in the game (cutscenes included). Off by default. |
 
 Settings are saved to `reframework/data/uw_fov_snap_fix_v12.json`.
 

@@ -32,7 +32,7 @@
 --
 -- To remove: delete this file from reframework/autorun.
 
-local VERSION = 12
+local VERSION = 14
 local CONFIG_FILE = "uw_fov_snap_fix_v12.json"
 
 -- GUI objects REFramework treats as "a menu showing the game scene is open".
@@ -52,6 +52,7 @@ local cfg = {
     resize_background = true, -- keep the frozen screen copy and enlarge it
     steady_map_fov = true,    -- hold the FOV steady while the map opens and closes
     diagnostics = false,      -- writes camera/GUI state to the REFramework log, for troubleshooting
+    camera_log = false,       -- logs every camera change, anywhere (cutscenes included)
 }
 
 local function load_config()
@@ -155,8 +156,10 @@ local function is_menu_panel(name)
     return name == "AcBackGround" or string.find(name, "^Gui_ui3%d%d%d") ~= nil
 end
 
+-- The map is Gui_ui0500, Gui_ui0501 and Gui_ui0502. Gui_ui0510 must not
+-- match: it stays on screen throughout cutscenes.
 local function is_map_panel(name)
-    return string.find(name, "^Gui_ui05") ~= nil
+    return string.find(name, "^Gui_ui050%d$") ~= nil
 end
 
 local function view_type_of(name, element)
@@ -276,7 +279,7 @@ re.on_pre_gui_draw_element(function(element, context)
                 end
             end
 
-            if cfg.diagnostics and draw then gui_now[name] = true end
+            if (cfg.diagnostics or cfg.camera_log) and draw then gui_now[name] = true end
         end)
     end
     return draw
@@ -396,7 +399,7 @@ local function write_diagnostics(note)
     local now = os.clock()
     local in_window = (now - math.max(last_menu_time, last_map_time)) < DIAG_WINDOW_SECONDS
 
-    if in_window then
+    if in_window or cfg.camera_log then
         local added, removed = {}, {}
         for name, _ in pairs(gui_now) do
             if not gui_prev[name] then added[#added + 1] = name end
@@ -418,7 +421,7 @@ local function write_diagnostics(note)
     local hidden = table.concat(sorted_keys(hidden_now), ",")
     hidden_now = {}
 
-    if not in_window then
+    if not in_window or not cfg.diagnostics then
         menu_now = {}
         return
     end
@@ -446,6 +449,58 @@ local function write_diagnostics(note)
         log.info(string.format("[uwfix] f=%d t=%.3f %s", frame_index, now, signature))
         diag_lines = diag_lines + 1
     end
+end
+
+-- Camera log: one line whenever the camera, its FOV or the state of the wide
+-- view changes, wherever the game is (cutscenes included). "MISMATCH" marks
+-- frames drawn with a view other than the wide one the fix should give.
+local cam_prev = nil
+
+local function write_camera_log(note)
+    if pre == nil then return end
+    local cam = sdk.get_primary_camera()
+    if cam == nil then return end
+    local cur = {
+        addr = cam:get_address(),
+        pre_fov = pre.fov,
+        pre_vert = pre.vert,
+        fov = cam:call("get_FOV"),
+        vert = cam:call("get_VerticalEnable"),
+        aspect = cam:call("get_AspectRatio"),
+        note = note,
+    }
+    local function to_vertical(fov, aspect)
+        return math.deg(2.0 * math.atan(math.tan(math.rad(fov) / 2.0) / aspect))
+    end
+    -- Vertical FOV actually drawn, and the one the fix is meant to give.
+    cur.drawn = cur.vert and cur.fov or to_vertical(cur.fov, cur.aspect)
+    cur.expected = cur.pre_vert and cur.pre_fov or wide_vfov(cur.pre_fov, cur.aspect)
+    cur.mismatch = math.abs(cur.drawn - cur.expected) > 0.05
+
+    local p = cam_prev
+    cam_prev = cur
+    local changed = p == nil
+        or p.addr ~= cur.addr
+        or p.note ~= cur.note
+        or p.mismatch ~= cur.mismatch
+        or p.vert ~= cur.vert
+        or p.pre_vert ~= cur.pre_vert
+        or math.abs(p.aspect - cur.aspect) > 0.001
+        or math.abs(p.pre_fov - cur.pre_fov) > 0.5
+        or math.abs(p.drawn - cur.drawn) > 0.5
+    if not changed then return end
+
+    local pos = try(function()
+        local v = camera_position(cam)
+        return string.format("%.1f,%.1f,%.1f", v.x, v.y, v.z)
+    end, "?")
+    log.info(string.format(
+        "[uwcam] f=%d t=%.3f cam=%x game_fov=%.2f(%s) set_fov=%.2f(%s) aspect=%.3f drawn_v=%.2f expected_v=%.2f %s did=%s pos=%s",
+        frame_index, os.clock(), cur.addr,
+        cur.pre_fov, cur.pre_vert and "V" or "H",
+        cur.fov, cur.vert and "V" or "H",
+        cur.aspect, cur.drawn, cur.expected,
+        cur.mismatch and "MISMATCH" or "ok", note, pos))
 end
 
 -- Apply the planned FOV. Runs after REFramework's own fix for this frame.
@@ -497,7 +552,10 @@ re.on_application_entry("LockScene", function()
         end)
     end
 
-    if cfg.diagnostics then
+    if cfg.camera_log then
+        guarded(function() write_camera_log(note) end)
+    end
+    if cfg.diagnostics or cfg.camera_log then
         guarded(function() write_diagnostics(note) end)
     end
 end)
@@ -549,6 +607,12 @@ re.on_draw_ui(function()
         changed, value = imgui.checkbox("Diagnostics (writes to REFramework log)", cfg.diagnostics)
         if changed then
             cfg.diagnostics = value
+            save_config()
+        end
+
+        changed, value = imgui.checkbox("Camera log (all camera changes, for cutscenes)", cfg.camera_log)
+        if changed then
+            cfg.camera_log = value
             save_config()
         end
 
