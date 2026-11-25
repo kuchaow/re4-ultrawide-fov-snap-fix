@@ -8,6 +8,12 @@ around the map.
 The jump is most visible at 32:9, where the ultrawide fix changes the camera
 a lot. It was written and tested at 5120x1440.
 
+> **Status: experimental, tested on one setup only.** 32:9 (5120x1440), the
+> Steam version running on macOS through CrossOver (D3DMetal), with the
+> `realyxl/REFramework` fork, in November 2026. It has not been tested on
+> Windows, with official REFramework builds, or at 21:9. Reports from other
+> setups are welcome in the issues.
+
 ## The problem
 
 REFramework's **Ultrawide/FOV/Aspect Ratio Fix** widens the camera every
@@ -85,3 +91,7 @@ Settings are saved to `reframework/data/uw_fov_snap_fix_v12.json`.
 ## Uninstall
 
 Delete `uw_fov_snap_fix.lua` from `reframework/autorun/`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
