@@ -32,7 +32,7 @@
 --
 -- To remove: delete this file from reframework/autorun.
 
-local VERSION = 14
+local VERSION = 16
 local CONFIG_FILE = "uw_fov_snap_fix_v12.json"
 
 -- GUI objects REFramework treats as "a menu showing the game scene is open".
@@ -92,6 +92,10 @@ local FOV_HOLD_TOLERANCE = 1.5
 -- Time constant of the glide used when the FOV does have to change.
 local SMOOTH_TIME_CONSTANT = 0.06
 local SMOOTH_STALE_SECONDS = 0.25
+-- A camera cut: the camera moved this far (metres) or its FOV changed this
+-- much (degrees) in a single frame. The FOV is never glided across a cut.
+local CUT_DISTANCE = 1.5
+local CUT_FOV_DEGREES = 8.0
 -- The enlarged screen copy is made this much bigger than strictly needed so
 -- that no edge can show.
 local BACKGROUND_OVERSCAN = 1.003
@@ -106,6 +110,8 @@ local hold_base_fov = nil  -- FOV being held steady during the current episode
 local gameplay_fov = nil   -- last FOV seen with no menu or map involved
 local smooth_vfov = nil
 local smooth_time = 0.0
+local last_pos = nil       -- camera position and FOV on the previous frame
+local last_pre_fov = nil
 local world_panel_drawn = false -- a camera-drawn menu panel was drawn unskipped, unresized
 local world_panel_drawn_copy = false
 
@@ -246,7 +252,11 @@ re.on_pre_gui_draw_element(function(element, context)
             if go == nil then return end
             local name = go:call("get_Name")
             if name == nil then return end
-            local drawn = flag(go, "get_DrawSelf") and flag(go, "get_UpdateSelf")
+            -- Same test REFramework uses (the effective flags), plus the
+            -- object's own. In Separate Ways the inventory object keeps its
+            -- own flags set during cutscenes while not actually being shown.
+            local drawn = flag(go, "get_Draw") and flag(go, "get_Update")
+                and flag(go, "get_DrawSelf") and flag(go, "get_UpdateSelf")
             if not drawn then return end
 
             if MENU_GUI[name] then
@@ -347,6 +357,19 @@ re.on_pre_application_entry("LockScene", function()
         local pos = camera_position(cam)
         local now = os.clock()
         local in_world = pos ~= nil and pos.y >= MENU_SCENE_MAX_Y
+
+        -- On a camera cut, drop the glide so the new FOV applies at once.
+        if pos ~= nil then
+            if last_pos ~= nil then
+                local dx, dy, dz = pos.x - last_pos.x, pos.y - last_pos.y, pos.z - last_pos.z
+                if dx * dx + dy * dy + dz * dz > CUT_DISTANCE * CUT_DISTANCE
+                    or math.abs(pre.fov - last_pre_fov) > CUT_FOV_DEGREES then
+                    smooth_vfov = nil
+                end
+            end
+            last_pos = { x = pos.x, y = pos.y, z = pos.z }
+            last_pre_fov = pre.fov
+        end
         if pos ~= nil and not in_world then
             last_menu_scene_time = now
         end
@@ -503,19 +526,36 @@ local function write_camera_log(note)
         cur.mismatch and "MISMATCH" or "ok", note, pos))
 end
 
+-- Whether REFramework's fix last set the camera in vertical-FOV mode
+-- ("Ultrawide: Enable Vertical FOV"). The script sets the camera the same way.
+local builtin_vertical = true
+
+local function to_horizontal(vfov, aspect)
+    return math.deg(2.0 * math.atan(math.tan(math.rad(vfov) / 2.0) * aspect))
+end
+
+local function to_vertical(fov, aspect)
+    return math.deg(2.0 * math.atan(math.tan(math.rad(fov) / 2.0) / aspect))
+end
+
 -- Apply the planned FOV. Runs after REFramework's own fix for this frame.
 local function apply_plan(cam, panels_on_screen)
     local fov = cam:call("get_FOV")
     local vert = cam:call("get_VerticalEnable")
+    local aspect = cam:call("get_AspectRatio")
     local builtin_active = vert or pre.vert or math.abs(fov - pre.fov) > 0.001
 
     if builtin_active then
         -- REFramework already set the wide view and will restore the camera
-        -- itself. Only adjust the value, and only in vertical-FOV mode.
-        if planned_vfov ~= nil and vert and not pre.vert and math.abs(planned_vfov - fov) >= 0.02 then
-            cam:call("set_FOV", planned_vfov)
-            held_count = held_count + 1
-            return "builtin-held"
+        -- itself. Only adjust the value, in whichever mode it used.
+        if not pre.vert then builtin_vertical = vert end
+        if planned_vfov ~= nil and not pre.vert then
+            local current = vert and fov or to_vertical(fov, aspect)
+            if math.abs(planned_vfov - current) >= 0.02 then
+                cam:call("set_FOV", vert and planned_vfov or to_horizontal(planned_vfov, aspect))
+                held_count = held_count + 1
+                return "builtin-held"
+            end
         end
         return "builtin"
     end
@@ -524,8 +564,12 @@ local function apply_plan(cam, panels_on_screen)
     if (os.clock() - last_menu_time) > ACTIVE_WINDOW_SECONDS then return "idle" end
     if panels_on_screen then return "wait-panels" end
 
-    cam:call("set_VerticalEnable", true)
-    cam:call("set_FOV", planned_vfov)
+    if builtin_vertical then
+        cam:call("set_VerticalEnable", true)
+        cam:call("set_FOV", planned_vfov)
+    else
+        cam:call("set_FOV", to_horizontal(planned_vfov, aspect))
+    end
     applied = { cam = cam, fov = fov, vert = vert }
     applied_count = applied_count + 1
     return "wide"

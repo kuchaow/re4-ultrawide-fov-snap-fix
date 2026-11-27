@@ -53,8 +53,12 @@ menu and map transitions.
 
 - Resident Evil 4 (2023) on PC.
 - [REFramework](https://github.com/praydog/REFramework) with
-  **Ultrawide/FOV/Aspect Ratio Fix** and **Ultrawide: Enable Vertical FOV**
-  turned on, and **Ultrawide: Override FOV** off.
+  **Ultrawide/FOV/Aspect Ratio Fix** turned on and **Ultrawide: Override FOV**
+  off.
+
+**Ultrawide: Enable Vertical FOV** can be on or off. Off is recommended: with
+it on, the game's depth of field blurs the background far too much in some
+areas (seen at the lake at 32:9). The picture is otherwise the same.
 
 Tested with the game running on macOS through CrossOver (D3DMetal), using
 the `realyxl/REFramework` fork, release `v0.2_beta`. It has not been tested
@@ -85,7 +89,6 @@ Settings are saved to `reframework/data/uw_fov_snap_fix_v12.json`.
 
 - On item pickups the grey smoke backdrop disappears at once instead of
   fading, because it is skipped rather than resized.
-- Only the vertical-FOV mode of the ultrawide fix is handled.
 - The panel names, the inventory scene position and the timings were
   measured on one game version and may need updating after a game patch.
 
